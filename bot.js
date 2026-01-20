@@ -1,18 +1,15 @@
 require("dotenv").config();
 
-const { 
-  Client, 
-  GatewayIntentBits, 
-  REST, 
-  Routes, 
-  SlashCommandBuilder 
+const {
+  Client,
+  GatewayIntentBits,
+  REST,
+  Routes,
+  SlashCommandBuilder
 } = require("discord.js");
 
-const fetch = (...args) =>
-  import("node-fetch").then(({ default: fetch }) => fetch(...args));
-
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
+  intents: [GatewayIntentBits.Guilds]
 });
 
 /* ===== MAPA TABORU ===== */
@@ -84,8 +81,16 @@ client.on("interactionCreate", async interaction => {
   try {
     const res = await fetch(
       "https://rozklady.skarzysko.pl/getRunningVehicles.json",
-      { timeout: 10000 }
+      {
+        headers: {
+          "User-Agent": "DiscordBot"
+        }
+      }
     );
+
+    if (!res.ok) {
+      throw new Error("HTTP " + res.status);
+    }
 
     const data = await res.json();
 
@@ -102,7 +107,7 @@ client.on("interactionCreate", async interaction => {
 
     await interaction.editReply(list.join("\n"));
   } catch (err) {
-    console.error(err);
+    console.error("API ERROR:", err);
     await interaction.editReply("❌ Błąd pobierania danych.");
   }
 });
