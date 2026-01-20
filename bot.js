@@ -80,7 +80,7 @@ const commands = [
     .setDescription("Ostatnie wyjazdy śledzonych pojazdów")
 ];
 
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   console.log(`🤖 Bot online: ${client.user.tag}`);
 
   const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
@@ -98,23 +98,32 @@ client.once("ready", async () => {
   setInterval(checkVehicles, 60 * 1000);
 });
 
+/* ===== FUNKCJA POBIERANIA ===== */
+async function fetchVehicles() {
+  const res = await fetch(
+    "https://rozklady.skarzysko.pl/getRunningVehicles.json",
+    { headers: { "User-Agent": "DiscordBot" } }
+  );
+
+  const data = await res.json();
+
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.vehicles)) return data.vehicles;
+
+  throw new Error("Nieznany format API");
+}
+
 /* ===== OBSŁUGA KOMEND ===== */
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  /* /pojazdy */
   if (interaction.commandName === "pojazdy") {
     await interaction.deferReply();
 
     try {
-      const res = await fetch(
-        "https://rozklady.skarzysko.pl/getRunningVehicles.json",
-        { headers: { "User-Agent": "DiscordBot" } }
-      );
+      const vehicles = await fetchVehicles();
 
-      const data = await res.json();
-
-      const list = data
+      const list = vehicles
         .sort((a,b)=>String(a.vehicleID).localeCompare(String(b.vehicleID)))
         .map(v =>
           `**${v.vehicleID}** (${vehiclesMap[v.vehicleID] || "?"}) — linia **${v.lineName}**`
@@ -123,12 +132,12 @@ client.on("interactionCreate", async interaction => {
       await interaction.editReply(
         list.length ? list.join("\n") : "Brak aktywnych pojazdów."
       );
-    } catch {
+    } catch (err) {
+      console.error(err);
       await interaction.editReply("❌ Błąd pobierania danych.");
     }
   }
 
-  /* /historia */
   if (interaction.commandName === "historia") {
     if (!history.length) {
       return interaction.reply("Brak zapisanych wyjazdów.");
@@ -147,34 +156,30 @@ client.on("interactionCreate", async interaction => {
 /* ===== MONITOR ===== */
 async function checkVehicles() {
   try {
-    const res = await fetch(
-      "https://rozklady.skarzysko.pl/getRunningVehicles.json",
-      { headers: { "User-Agent": "DiscordBot" } }
-    );
-
-    const data = await res.json();
-    const current = new Set(data.map(v => String(v.vehicleID)));
+    const vehicles = await fetchVehicles();
+    const current = new Set(vehicles.map(v => String(v.vehicleID)));
 
     const channel = await client.channels.fetch(process.env.CHANNEL_ID);
     const rolePing = `<@&${process.env.ROLE_ID}>`;
 
     for (const id of trackedVehicles) {
       if (current.has(id) && !lastActiveVehicles.has(id)) {
-        const vehicle = data.find(v => String(v.vehicleID) === id);
+        const vehicle = vehicles.find(v => String(v.vehicleID) === id);
+        if (!vehicle) continue;
+
         const desc = vehiclesMap[id] || "?";
         const time = new Date().toLocaleTimeString("pl-PL");
 
-        const entry = {
+        history.push({
           id,
           desc,
           line: vehicle.lineName,
           time
-        };
+        });
 
-        history.push(entry);
         fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
 
-        channel.send(
+        await channel.send(
           `${rolePing}\n🚍 **${id}** (${desc}) wyjechał na linię **${vehicle.lineName}** o **${time}**`
         );
       }
@@ -182,7 +187,7 @@ async function checkVehicles() {
 
     lastActiveVehicles = current;
   } catch (err) {
-    console.error("Monitor error:", err);
+    console.error("Monitor error:", err.message);
   }
 }
 
