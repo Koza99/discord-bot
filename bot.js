@@ -12,7 +12,7 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-/* ===== MAPA TABORU ===== */
+/* ===== MAPA TABORU (OPISY DLA WSZYSTKICH) ===== */
 const vehiclesMap = {
   "ZS01": "Solaris Urbino 10,5",
   "ZS02": "Solaris Urbino 10,5",
@@ -52,6 +52,22 @@ const vehiclesMap = {
   "478": "Autosan M12LE.V02"
 };
 
+/* ===== POJAZDY Z POWIADOMIENIAMI ===== */
+const trackedVehicles = [
+  "441",
+  "442",
+  "443",
+  "445",
+  "451",
+  "452",
+  "453",
+  "456",
+  "457",
+  "471"
+];
+
+let lastActiveVehicles = new Set();
+
 /* ===== KOMENDA ===== */
 const command = new SlashCommandBuilder()
   .setName("pojazdy")
@@ -61,6 +77,7 @@ client.once("ready", async () => {
   console.log(`🤖 Bot online: ${client.user.tag}`);
 
   const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
+
   await rest.put(
     Routes.applicationGuildCommands(
       process.env.CLIENT_ID,
@@ -70,8 +87,11 @@ client.once("ready", async () => {
   );
 
   console.log("✅ /pojazdy zarejestrowane");
+
+  setInterval(checkVehicles, 60 * 1000);
 });
 
+/* ===== /pojazdy ===== */
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName !== "pojazdy") return;
@@ -81,16 +101,10 @@ client.on("interactionCreate", async interaction => {
   try {
     const res = await fetch(
       "https://rozklady.skarzysko.pl/getRunningVehicles.json",
-      {
-        headers: {
-          "User-Agent": "DiscordBot"
-        }
-      }
+      { headers: { "User-Agent": "DiscordBot" } }
     );
 
-    if (!res.ok) {
-      throw new Error("HTTP " + res.status);
-    }
+    if (!res.ok) throw new Error("HTTP " + res.status);
 
     const data = await res.json();
 
@@ -101,15 +115,45 @@ client.on("interactionCreate", async interaction => {
         return `**${v.vehicleID}** (${desc}) — linia **${v.lineName}**`;
       });
 
-    if (!list.length) {
-      return interaction.editReply("Brak aktywnych pojazdów.");
-    }
-
-    await interaction.editReply(list.join("\n"));
+    await interaction.editReply(
+      list.length ? list.join("\n") : "Brak aktywnych pojazdów."
+    );
   } catch (err) {
-    console.error("API ERROR:", err);
+    console.error(err);
     await interaction.editReply("❌ Błąd pobierania danych.");
   }
 });
+
+/* ===== MONITOR WYJAZDÓW ===== */
+async function checkVehicles() {
+  try {
+    const res = await fetch(
+      "https://rozklady.skarzysko.pl/getRunningVehicles.json",
+      { headers: { "User-Agent": "DiscordBot" } }
+    );
+
+    if (!res.ok) return;
+
+    const data = await res.json();
+    const current = new Set(data.map(v => String(v.vehicleID)));
+
+    const channel = await client.channels.fetch(process.env.CHANNEL_ID);
+
+    for (const id of trackedVehicles) {
+      if (current.has(id) && !lastActiveVehicles.has(id)) {
+        const vehicle = data.find(v => String(v.vehicleID) === id);
+        const desc = vehiclesMap[id] || "nieznany typ";
+
+        channel.send(
+          `🚍 **${id}** (${desc}) wyjechał na linię **${vehicle.lineName}**`
+        );
+      }
+    }
+
+    lastActiveVehicles = current;
+  } catch (err) {
+    console.error("Monitor error:", err);
+  }
+}
 
 client.login(process.env.TOKEN);
