@@ -1,22 +1,22 @@
 require("dotenv").config();
 
-const {
-  Client,
-  GatewayIntentBits,
-  REST,
-  Routes,
-  SlashCommandBuilder
+const { 
+  Client, 
+  GatewayIntentBits, 
+  REST, 
+  Routes, 
+  SlashCommandBuilder 
 } = require("discord.js");
 
 const fetch = (...args) =>
   import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
+  intents: [GatewayIntentBits.Guilds],
 });
 
-// ===== MAPA TABORU =====
-const vehicleNames = {
+/* ===== MAPA TABORU ===== */
+const vehiclesMap = {
   "ZS01": "Solaris Urbino 10,5",
   "ZS02": "Solaris Urbino 10,5",
   "ZS03": "Solaris Urbino 10,5",
@@ -25,6 +25,7 @@ const vehicleNames = {
   "ZS06": "Solaris Urbino 10,5",
   "ZS07": "Solaris Urbino 10,5",
   "ZS08": "Solaris Urbino 10,5",
+
   "441": "MAN NL263",
   "442": "MAN NL263",
   "443": "MAN NL263",
@@ -35,53 +36,45 @@ const vehicleNames = {
   "455": "MAN NL313",
   "456": "MAN NL313",
   "457": "MAN NL313",
-  "459": "MAN NL313 Lion's City",
-  "460": "MAN NÜ273 Lion's City Ü",
-  "461": "MAN NÜ273 Lion's City Ü",
-  "462": "MAN NL313 Lion's City",
-  "465": "MAN NL313 Lion's City",
-  "467": "MAN NÜ313 Lion's City Ü",
-  "468": "MAN NÜ313 Lion's City Ü",
-  "469": "MAN NL243 Lion's City",
-  "470": "MAN NÜ313 Lion's City Ü",
+  "459": "MAN NL313 Lion’s City",
+  "460": "MAN NÜ273 Lion’s City Ü",
+  "461": "MAN NÜ273 Lion’s City Ü",
+  "462": "MAN NL313 Lion’s City",
+  "465": "MAN NL313 Lion’s City",
+  "467": "MAN NÜ313 Lion’s City Ü",
+  "468": "MAN NÜ313 Lion’s City Ü",
+  "469": "MAN NL243 Lion’s City",
+  "470": "MAN NÜ313 Lion’s City Ü",
   "471": "MAN NL263",
-  "472": "MAN NL263 Lion's City",
-  "473": "MAN NL263 Lion's City",
-  "474": "MAN NL273 Lion's City",
-  "475": "MAN NL293 Lion's City",
-  "476": "MAN NL293 Lion's City",
+  "472": "MAN NL263 Lion’s City",
+  "473": "MAN NL263 Lion’s City",
+  "474": "MAN NL273 Lion’s City",
+  "475": "MAN NL293 Lion’s City",
+  "476": "MAN NL293 Lion’s City",
   "477": "Autosan M12LF.01",
   "478": "Autosan M12LE.V02"
 };
 
-// ===== KOMENDA =====
-const commands = [
-  new SlashCommandBuilder()
-    .setName("pojazdy")
-    .setDescription("Aktywne pojazdy z linii")
-    .toJSON()
-];
+/* ===== KOMENDA ===== */
+const command = new SlashCommandBuilder()
+  .setName("pojazdy")
+  .setDescription("Lista aktywnych pojazdów");
 
-// ===== REJESTRACJA SLASH =====
-const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
+client.once("ready", async () => {
+  console.log(`🤖 Bot online: ${client.user.tag}`);
 
-(async () => {
+  const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
   await rest.put(
     Routes.applicationGuildCommands(
       process.env.CLIENT_ID,
       process.env.GUILD_ID
     ),
-    { body: commands }
+    { body: [command.toJSON()] }
   );
-  console.log("✅ /pojazdy zarejestrowane");
-})();
 
-// ===== READY =====
-client.once("ready", () => {
-  console.log(`🤖 Bot online: ${client.user.tag}`);
+  console.log("✅ /pojazdy zarejestrowane");
 });
 
-// ===== OBSŁUGA KOMENDY =====
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName !== "pojazdy") return;
@@ -89,27 +82,28 @@ client.on("interactionCreate", async interaction => {
   await interaction.deferReply();
 
   try {
-    const res = await fetch("https://rozklady.skarzysko.pl/getRunningVehicles.json");
-    const data = await res.json();
-
-    if (!Array.isArray(data)) {
-      return interaction.editReply("❌ Brak danych.");
-    }
-
-    const list = data
-      .map(v => {
-        const name = vehicleNames[v.vehicleID] || "Nieznany pojazd";
-        return `${v.vehicleID} (${name}) — linia ${v.lineName}`;
-      })
-      .sort((a, b) => a.localeCompare(b, "pl", { numeric: true }));
-
-    await interaction.editReply(
-      list.length ? list.join("\n") : "🚫 Brak aktywnych pojazdów"
+    const res = await fetch(
+      "https://rozklady.skarzysko.pl/getRunningVehicles.json",
+      { timeout: 10000 }
     );
 
+    const data = await res.json();
+
+    const list = data
+      .sort((a, b) => String(a.vehicleID).localeCompare(String(b.vehicleID)))
+      .map(v => {
+        const desc = vehiclesMap[v.vehicleID] || "nieznany typ";
+        return `**${v.vehicleID}** (${desc}) — linia **${v.lineName}**`;
+      });
+
+    if (!list.length) {
+      return interaction.editReply("Brak aktywnych pojazdów.");
+    }
+
+    await interaction.editReply(list.join("\n"));
   } catch (err) {
     console.error(err);
-    await interaction.editReply("❌ Błąd połączenia z API.");
+    await interaction.editReply("❌ Błąd pobierania danych.");
   }
 });
 
