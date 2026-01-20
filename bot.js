@@ -1,4 +1,5 @@
 require("dotenv").config();
+const fs = require("fs");
 
 const {
   Client,
@@ -12,7 +13,7 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-/* ===== MAPA TABORU (OPISY DLA WSZYSTKICH) ===== */
+/* ===== MAPA TABORU ===== */
 const vehiclesMap = {
   "ZS01": "Solaris Urbino 10,5",
   "ZS02": "Solaris Urbino 10,5",
@@ -52,26 +53,32 @@ const vehiclesMap = {
   "478": "Autosan M12LE.V02"
 };
 
-/* ===== POJAZDY Z POWIADOMIENIAMI ===== */
+/* ===== ŚLEDZONE POJAZDY ===== */
 const trackedVehicles = [
-  "441",
-  "442",
-  "443",
-  "445",
-  "451",
-  "452",
-  "453",
-  "456",
-  "457",
-  "471"
+  "441","442","443","445","451",
+  "452","453","456","457","471"
 ];
 
 let lastActiveVehicles = new Set();
 
-/* ===== KOMENDA ===== */
-const command = new SlashCommandBuilder()
-  .setName("pojazdy")
-  .setDescription("Lista aktywnych pojazdów");
+/* ===== HISTORIA ===== */
+const HISTORY_FILE = "./history.json";
+let history = [];
+
+if (fs.existsSync(HISTORY_FILE)) {
+  history = JSON.parse(fs.readFileSync(HISTORY_FILE, "utf8"));
+}
+
+/* ===== KOMENDY ===== */
+const commands = [
+  new SlashCommandBuilder()
+    .setName("pojazdy")
+    .setDescription("Lista aktywnych pojazdów"),
+
+  new SlashCommandBuilder()
+    .setName("historia")
+    .setDescription("Ostatnie wyjazdy śledzonych pojazdów")
+];
 
 client.once("ready", async () => {
   console.log(`🤖 Bot online: ${client.user.tag}`);
@@ -83,48 +90,61 @@ client.once("ready", async () => {
       process.env.CLIENT_ID,
       process.env.GUILD_ID
     ),
-    { body: [command.toJSON()] }
+    { body: commands.map(c => c.toJSON()) }
   );
 
-  console.log("✅ /pojazdy zarejestrowane");
+  console.log("✅ Komendy zarejestrowane");
 
   setInterval(checkVehicles, 60 * 1000);
 });
 
-/* ===== /pojazdy ===== */
+/* ===== OBSŁUGA KOMEND ===== */
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
-  if (interaction.commandName !== "pojazdy") return;
 
-  await interaction.deferReply();
+  /* /pojazdy */
+  if (interaction.commandName === "pojazdy") {
+    await interaction.deferReply();
 
-  try {
-    const res = await fetch(
-      "https://rozklady.skarzysko.pl/getRunningVehicles.json",
-      { headers: { "User-Agent": "DiscordBot" } }
+    try {
+      const res = await fetch(
+        "https://rozklady.skarzysko.pl/getRunningVehicles.json",
+        { headers: { "User-Agent": "DiscordBot" } }
+      );
+
+      const data = await res.json();
+
+      const list = data
+        .sort((a,b)=>String(a.vehicleID).localeCompare(String(b.vehicleID)))
+        .map(v =>
+          `**${v.vehicleID}** (${vehiclesMap[v.vehicleID] || "?"}) — linia **${v.lineName}**`
+        );
+
+      await interaction.editReply(
+        list.length ? list.join("\n") : "Brak aktywnych pojazdów."
+      );
+    } catch {
+      await interaction.editReply("❌ Błąd pobierania danych.");
+    }
+  }
+
+  /* /historia */
+  if (interaction.commandName === "historia") {
+    if (!history.length) {
+      return interaction.reply("Brak zapisanych wyjazdów.");
+    }
+
+    const last = history.slice(-10).reverse();
+
+    interaction.reply(
+      last.map(h =>
+        `🚍 **${h.id}** (${h.desc}) — linia **${h.line}** o **${h.time}**`
+      ).join("\n")
     );
-
-    if (!res.ok) throw new Error("HTTP " + res.status);
-
-    const data = await res.json();
-
-    const list = data
-      .sort((a, b) => String(a.vehicleID).localeCompare(String(b.vehicleID)))
-      .map(v => {
-        const desc = vehiclesMap[v.vehicleID] || "nieznany typ";
-        return `**${v.vehicleID}** (${desc}) — linia **${v.lineName}**`;
-      });
-
-    await interaction.editReply(
-      list.length ? list.join("\n") : "Brak aktywnych pojazdów."
-    );
-  } catch (err) {
-    console.error(err);
-    await interaction.editReply("❌ Błąd pobierania danych.");
   }
 });
 
-/* ===== MONITOR WYJAZDÓW ===== */
+/* ===== MONITOR ===== */
 async function checkVehicles() {
   try {
     const res = await fetch(
@@ -132,20 +152,30 @@ async function checkVehicles() {
       { headers: { "User-Agent": "DiscordBot" } }
     );
 
-    if (!res.ok) return;
-
     const data = await res.json();
     const current = new Set(data.map(v => String(v.vehicleID)));
 
     const channel = await client.channels.fetch(process.env.CHANNEL_ID);
+    const rolePing = `<@&${process.env.ROLE_ID}>`;
 
     for (const id of trackedVehicles) {
       if (current.has(id) && !lastActiveVehicles.has(id)) {
         const vehicle = data.find(v => String(v.vehicleID) === id);
-        const desc = vehiclesMap[id] || "nieznany typ";
+        const desc = vehiclesMap[id] || "?";
+        const time = new Date().toLocaleTimeString("pl-PL");
+
+        const entry = {
+          id,
+          desc,
+          line: vehicle.lineName,
+          time
+        };
+
+        history.push(entry);
+        fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
 
         channel.send(
-          `🚍 **${id}** (${desc}) wyjechał na linię **${vehicle.lineName}**`
+          `${rolePing}\n🚍 **${id}** (${desc}) wyjechał na linię **${vehicle.lineName}** o **${time}**`
         );
       }
     }
