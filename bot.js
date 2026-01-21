@@ -89,12 +89,27 @@ async function fetchVehicles() {
     if (Array.isArray(data)) return data;
     if (Array.isArray(data.vehicles)) return data.vehicles;
 
-    console.error("⚠️ Nieznany format API:", data);
     return [];
-  } catch (e) {
-    console.error("❌ Błąd API:", e.message);
+  } catch {
     return [];
   }
+}
+
+// ================= SORT =================
+function sortVehicles(a, b) {
+  const A = String(a.vehicleID || a.vehicleId);
+  const B = String(b.vehicleID || b.vehicleId);
+
+  const isZS_A = A.startsWith("ZS");
+  const isZS_B = B.startsWith("ZS");
+
+  if (isZS_A && !isZS_B) return -1;
+  if (!isZS_A && isZS_B) return 1;
+
+  const numA = parseInt(A.replace(/\D/g, ""));
+  const numB = parseInt(B.replace(/\D/g, ""));
+
+  return numA - numB;
 }
 
 // ================= LISTA CO 10 MIN =================
@@ -103,6 +118,7 @@ async function sendVehicleList() {
   if (!vehicles.length) return;
 
   const text = vehicles
+    .sort(sortVehicles)
     .map(v => {
       const id = String(v.vehicleID || v.vehicleId);
       if (id === "451") return null;
@@ -130,6 +146,9 @@ async function checkVehicles() {
 
     current.add(id);
 
+    // 🚨 ALERT TYLKO DLA WYBRANYCH
+    if (!ALERT_VEHICLES.includes(id)) continue;
+
     if (!lastVehicles.has(id)) {
       const desc = vehicleDescriptions[id] || "Nieznany pojazd";
       const text = `🚍 **${id}** (${desc}) wyjechał na linię **${v.lineName}**`;
@@ -141,11 +160,7 @@ async function checkVehicles() {
       history = history.slice(0, 50);
 
       const channel = await client.channels.fetch(CHANNEL_ID);
-      const ping = ALERT_VEHICLES.includes(id)
-        ? `<@&${PING_ROLE_ID}> `
-        : "";
-
-      await channel.send(ping + text);
+      await channel.send(`<@&${PING_ROLE_ID}> ${text}`);
     }
   }
 
@@ -154,12 +169,8 @@ async function checkVehicles() {
 
 // ================= KOMENDY =================
 const commands = [
-  new SlashCommandBuilder()
-    .setName("pojazdy")
-    .setDescription("Lista jeżdżących pojazdów"),
-  new SlashCommandBuilder()
-    .setName("historia")
-    .setDescription("Historia alertów")
+  new SlashCommandBuilder().setName("pojazdy").setDescription("Lista jeżdżących pojazdów"),
+  new SlashCommandBuilder().setName("historia").setDescription("Historia alertów")
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(TOKEN);
@@ -171,7 +182,6 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
   );
 })();
 
-// ================= INTERACTIONS =================
 client.on("interactionCreate", async i => {
   if (!i.isChatInputCommand()) return;
 
@@ -180,6 +190,7 @@ client.on("interactionCreate", async i => {
     if (!v.length) return i.reply("❌ Brak danych z API");
 
     const text = v
+      .sort(sortVehicles)
       .map(x => {
         const id = String(x.vehicleID || x.vehicleId);
         if (id === "451") return null;
@@ -207,8 +218,8 @@ client.once("ready", () => {
   checkVehicles();
   sendVehicleList();
 
-  setInterval(checkVehicles, 60 * 1000);        // alerty
-  setInterval(sendVehicleList, 10 * 60 * 1000); // lista
+  setInterval(checkVehicles, 60 * 1000);
+  setInterval(sendVehicleList, 10 * 60 * 1000);
 });
 
 client.login(TOKEN);
