@@ -71,14 +71,15 @@ const vehicleDescriptions = {
   "478": "Autosan M12LE.V02"
 };
 
-// ================= ALERTY =================
+// ================= ALERTY TYLKO DLA TYCH =================
 const ALERT_VEHICLES = [
   "441", "442", "443", "445", "451",
-  "452", "453", "456", "457", "471"
+  "452", "453", "455", "456", "457", "471"
 ];
 
 // ================= STAN =================
 let lastVehicles = new Set();
+let history = []; // 👈 HISTORIA WYJAZDÓW
 
 // ================= FETCH API =================
 async function fetchVehicles() {
@@ -88,7 +89,6 @@ async function fetchVehicles() {
   if (data && Array.isArray(data.vehicles)) {
     return data.vehicles;
   }
-
   return [];
 }
 
@@ -99,16 +99,23 @@ async function checkVehicles() {
     const current = new Set();
 
     for (const v of vehicles) {
-      const id = String(v.vehicleId); // ← POPRAWIONE
+      const id = String(v.vehicleId);
       current.add(id);
 
       if (ALERT_VEHICLES.includes(id) && !lastVehicles.has(id)) {
         const channel = await client.channels.fetch(CHANNEL_ID);
         const desc = vehicleDescriptions[id] || "Nieznany pojazd";
+        const msg = `🚍 **${id}** (${desc}) wyjechał na linię **${v.lineName}**`;
 
-        await channel.send(
-          `<@&${PING_ROLE_ID}> 🚍 **${id}** (${desc}) wyjechał na linię **${v.lineName}**`
-        );
+        // zapis do historii
+        history.unshift({
+          text: msg,
+          time: new Date().toLocaleString("pl-PL")
+        });
+        history = history.slice(0, 50);
+
+        const ping = PING_ROLE_ID ? `<@&${PING_ROLE_ID}> ` : "";
+        await channel.send(ping + msg);
       }
     }
 
@@ -118,11 +125,14 @@ async function checkVehicles() {
   }
 }
 
-// ================= /pojazdy =================
+// ================= KOMENDY =================
 const commands = [
   new SlashCommandBuilder()
     .setName("pojazdy")
-    .setDescription("Lista aktualnie kursujących pojazdów")
+    .setDescription("Lista aktualnie kursujących pojazdów"),
+  new SlashCommandBuilder()
+    .setName("historia")
+    .setDescription("Historia ostatnich wyjazdów pojazdów")
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(TOKEN);
@@ -135,28 +145,41 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
   console.log("✅ Komendy zarejestrowane");
 })();
 
+// ================= OBSŁUGA KOMEND =================
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
-  if (interaction.commandName !== "pojazdy") return;
 
-  await interaction.deferReply();
+  if (interaction.commandName === "pojazdy") {
+    await interaction.deferReply();
+    const vehicles = await fetchVehicles();
 
-  const vehicles = await fetchVehicles();
+    if (!vehicles.length) {
+      return interaction.editReply("❌ Brak danych z API");
+    }
 
-  if (vehicles.length === 0) {
-    return interaction.editReply("❌ Brak danych z API");
+    const list = vehicles
+      .sort((a, b) => String(a.vehicleId).localeCompare(String(b.vehicleId)))
+      .map(v => {
+        const id = String(v.vehicleId);
+        const desc = vehicleDescriptions[id] || "Nieznany pojazd";
+        return `**${id}** (${desc}) — linia **${v.lineName}**`;
+      })
+      .join("\n");
+
+    return interaction.editReply(list);
   }
 
-  const list = vehicles
-    .sort((a, b) => String(a.vehicleId).localeCompare(String(b.vehicleId)))
-    .map(v => {
-      const id = String(v.vehicleId);
-      const desc = vehicleDescriptions[id] || "Nieznany pojazd";
-      return `**${id}** (${desc}) — linia **${v.lineName}**`;
-    })
-    .join("\n");
+  if (interaction.commandName === "historia") {
+    if (!history.length) {
+      return interaction.reply("📭 Brak zapisanych wyjazdów.");
+    }
 
-  interaction.editReply(list);
+    const text = history
+      .map(h => `🕒 ${h.time}\n${h.text}`)
+      .join("\n\n");
+
+    return interaction.reply(text);
+  }
 });
 
 // ================= READY =================
