@@ -1,4 +1,4 @@
-// ================= HTTP SERVER (ŻEBY RENDER NIE UBijał) =================
+// ================= HTTP SERVER (RENDER) =================
 const http = require("http");
 const PORT = process.env.PORT || 10000;
 
@@ -71,7 +71,7 @@ const vehicleDescriptions = {
   "478": "Autosan M12LE.V02"
 };
 
-// ================= ALERTY TYLKO DLA TYCH =================
+// ================= ALERTY =================
 const ALERT_VEHICLES = [
   "441", "442", "443", "445", "451",
   "452", "453", "456", "457", "471"
@@ -80,12 +80,11 @@ const ALERT_VEHICLES = [
 // ================= STAN =================
 let lastVehicles = new Set();
 
-// ================= FETCH API (POPRAWIONE) =================
+// ================= FETCH API =================
 async function fetchVehicles() {
   const res = await fetch(API_URL);
   const data = await res.json();
 
-  // API Skarżysko zwraca { vehicles: [...] }
   if (data && Array.isArray(data.vehicles)) {
     return data.vehicles;
   }
@@ -93,14 +92,14 @@ async function fetchVehicles() {
   return [];
 }
 
-// ================= SPRAWDZANIE CO 10 MIN =================
+// ================= CHECK CO 10 MIN =================
 async function checkVehicles() {
   try {
     const vehicles = await fetchVehicles();
     const current = new Set();
 
     for (const v of vehicles) {
-      const id = String(v.vehicleID);
+      const id = String(v.vehicleId); // ← POPRAWIONE
       current.add(id);
 
       if (ALERT_VEHICLES.includes(id) && !lastVehicles.has(id)) {
@@ -119,7 +118,7 @@ async function checkVehicles() {
   }
 }
 
-// ================= KOMENDA /pojazdy =================
+// ================= /pojazdy =================
 const commands = [
   new SlashCommandBuilder()
     .setName("pojazdy")
@@ -136,34 +135,28 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
   console.log("✅ Komendy zarejestrowane");
 })();
 
-// ================= OBSŁUGA KOMEND =================
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName !== "pojazdy") return;
 
   await interaction.deferReply();
 
-  try {
-    const vehicles = await fetchVehicles();
+  const vehicles = await fetchVehicles();
 
-    if (vehicles.length === 0) {
-      return interaction.editReply("❌ Brak danych z API");
-    }
-
-    const list = vehicles
-      .sort((a, b) =>
-        String(a.vehicleID).localeCompare(String(b.vehicleID))
-      )
-      .map(v => {
-        const desc = vehicleDescriptions[v.vehicleID] || "Nieznany pojazd";
-        return `**${v.vehicleID}** (${desc}) — linia **${v.lineName}**`;
-      })
-      .join("\n");
-
-    interaction.editReply(list);
-  } catch (err) {
-    interaction.editReply("❌ Błąd pobierania danych");
+  if (vehicles.length === 0) {
+    return interaction.editReply("❌ Brak danych z API");
   }
+
+  const list = vehicles
+    .sort((a, b) => String(a.vehicleId).localeCompare(String(b.vehicleId)))
+    .map(v => {
+      const id = String(v.vehicleId);
+      const desc = vehicleDescriptions[id] || "Nieznany pojazd";
+      return `**${id}** (${desc}) — linia **${v.lineName}**`;
+    })
+    .join("\n");
+
+  interaction.editReply(list);
 });
 
 // ================= READY =================
@@ -173,5 +166,4 @@ client.once("ready", () => {
   setInterval(checkVehicles, 10 * 60 * 1000);
 });
 
-// ================= LOGIN =================
 client.login(TOKEN);
