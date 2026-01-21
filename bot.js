@@ -29,7 +29,7 @@ const PING_ROLE_ID = process.env.PING_ROLE_ID;
 // ================= API =================
 const API_URL = "https://rozklady.skarzysko.pl/getRunningVehicles.json";
 
-// ================= OPISY POJAZDÓW (PEŁNE) =================
+// ================= OPISY POJAZDÓW =================
 const vehicleDescriptions = {
   "ZS01": "Solaris Urbino 10,5",
   "ZS02": "Solaris Urbino 10,5",
@@ -44,6 +44,7 @@ const vehicleDescriptions = {
   "442": "MAN NL263",
   "443": "MAN NL263",
   "445": "MAN NL263",
+  "451": "MAN NL263",
   "452": "MAN NL263",
   "453": "MAN NL313",
   "455": "MAN NL313",
@@ -82,10 +83,16 @@ let history = [];
 // ================= FETCH =================
 async function fetchVehicles() {
   try {
-    const res = await fetch(API_URL);
+    const res = await fetch(API_URL, { cache: "no-store" });
     const data = await res.json();
-    return Array.isArray(data) ? data : [];
-  } catch {
+
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data.vehicles)) return data.vehicles;
+
+    console.error("⚠️ Nieznany format API:", data);
+    return [];
+  } catch (e) {
+    console.error("❌ Błąd API:", e.message);
     return [];
   }
 }
@@ -147,8 +154,12 @@ async function checkVehicles() {
 
 // ================= KOMENDY =================
 const commands = [
-  new SlashCommandBuilder().setName("pojazdy").setDescription("Lista jeżdżących pojazdów"),
-  new SlashCommandBuilder().setName("historia").setDescription("Historia alertów")
+  new SlashCommandBuilder()
+    .setName("pojazdy")
+    .setDescription("Lista jeżdżących pojazdów"),
+  new SlashCommandBuilder()
+    .setName("historia")
+    .setDescription("Historia alertów")
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(TOKEN);
@@ -160,6 +171,7 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
   );
 })();
 
+// ================= INTERACTIONS =================
 client.on("interactionCreate", async i => {
   if (!i.isChatInputCommand()) return;
 
@@ -195,8 +207,8 @@ client.once("ready", () => {
   checkVehicles();
   sendVehicleList();
 
-  setInterval(checkVehicles, 60 * 1000);
-  setInterval(sendVehicleList, 10 * 60 * 1000);
+  setInterval(checkVehicles, 60 * 1000);        // alerty
+  setInterval(sendVehicleList, 10 * 60 * 1000); // lista
 });
 
 client.login(TOKEN);
