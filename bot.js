@@ -46,7 +46,6 @@ const vehicleDescriptions = {
   "442": "MAN NL263",
   "443": "MAN NL263",
   "445": "MAN NL263",
-  "451": "MAN NL263",
   "452": "MAN NL263",
   "453": "MAN NL313",
   "455": "MAN NL313",
@@ -73,8 +72,8 @@ const vehicleDescriptions = {
 
 // ================= ALERTY TYLKO DLA TYCH =================
 const ALERT_VEHICLES = [
-  "441", "442", "443", "445", "451",
-  "452", "453", "455", "456", "457", "471"
+  "441", "442", "443", "445", "452",
+  "453", "455", "456", "457", "471"
 ];
 
 // ================= STAN =================
@@ -190,3 +189,4 @@ client.once("ready", () => {
 });
 
 client.login(TOKEN);
+
