@@ -1,13 +1,11 @@
-// ================= HTTP SERVER (RENDER) =================
+// ================= HTTP KEEP-ALIVE (RENDER) =================
 const http = require("http");
 const PORT = process.env.PORT || 10000;
 
 http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("Discord bot działa");
-}).listen(PORT, () => {
-  console.log("🌐 HTTP server działa na porcie", PORT);
-});
+  res.writeHead(200);
+  res.end("OK");
+}).listen(PORT);
 
 // ================= DISCORD =================
 const {
@@ -34,14 +32,6 @@ const API_URL = "https://rozklady.skarzysko.pl/getRunningVehicles.json";
 
 // ================= OPISY POJAZDÓW =================
 const vehicleDescriptions = {
-  "ZS01": "Solaris Urbino 10,5",
-  "ZS02": "Solaris Urbino 10,5",
-  "ZS03": "Solaris Urbino 10,5",
-  "ZS04": "Solaris Urbino 10,5",
-  "ZS05": "Solaris Urbino 10,5",
-  "ZS06": "Solaris Urbino 10,5",
-  "ZS07": "Solaris Urbino 10,5",
-  "ZS08": "Solaris Urbino 10,5",
   "441": "MAN NL263",
   "442": "MAN NL263",
   "443": "MAN NL263",
@@ -51,87 +41,86 @@ const vehicleDescriptions = {
   "455": "MAN NL313",
   "456": "MAN NL313",
   "457": "MAN NL313",
-  "459": "MAN NL313 Lion`s City",
-  "460": "MAN NÜ273 Lion`s City Ü",
-  "461": "MAN NÜ273 Lion`s City Ü",
-  "462": "MAN NL313 Lion`s City",
-  "465": "MAN NL313 Lion`s City",
-  "467": "MAN NÜ313 Lion`s City Ü",
-  "468": "MAN NÜ313 Lion`s City Ü",
-  "469": "MAN NL243 Lion`s City",
-  "470": "MAN NÜ313 Lion`s City Ü",
-  "471": "MAN NL263",
-  "472": "MAN NL263 Lion`s City",
-  "473": "MAN NL263 Lion`s City",
-  "474": "MAN NL273 Lion`s City",
-  "475": "MAN NL293 Lion`s City",
-  "476": "MAN NL293 Lion`s City",
-  "477": "Autosan M12LF.01",
-  "478": "Autosan M12LE.V02"
+  "471": "MAN NL263"
 };
 
-// ================= ALERTY TYLKO DLA TYCH =================
+// ================= ALERTY (PING ROLI) =================
 const ALERT_VEHICLES = [
-  "441", "442", "443", "445", "452",
-  "453", "455", "456", "457", "471"
+  "441",
+  "442",
+  "443",
+  "445",
+  "452",
+  "453",
+  "455", // ← DODANY
+  "456",
+  "457",
+  "471"
 ];
 
 // ================= STAN =================
 let lastVehicles = new Set();
-let history = []; // 👈 HISTORIA WYJAZDÓW
+let history = [];
 
-// ================= FETCH API =================
+// ================= SAFE FETCH =================
 async function fetchVehicles() {
-  const res = await fetch(API_URL);
-  const data = await res.json();
+  try {
+    const res = await fetch(API_URL, { timeout: 10000 });
+    const data = await res.json();
 
-  if (data && Array.isArray(data.vehicles)) {
+    if (!data || !Array.isArray(data.vehicles)) return [];
     return data.vehicles;
+  } catch (err) {
+    console.error("⚠️ API error:", err.message);
+    return [];
   }
-  return [];
 }
 
-// ================= CHECK CO 10 MIN =================
+// ================= CHECK =================
 async function checkVehicles() {
-  try {
-    const vehicles = await fetchVehicles();
-    const current = new Set();
+  const vehicles = await fetchVehicles();
+  if (!vehicles.length) return;
 
-    for (const v of vehicles) {
-      const id = String(v.vehicleId);
-      current.add(id);
+  const current = new Set();
 
-      if (ALERT_VEHICLES.includes(id) && !lastVehicles.has(id)) {
-        const channel = await client.channels.fetch(CHANNEL_ID);
-        const desc = vehicleDescriptions[id] || "Nieznany pojazd";
-        const msg = `🚍 **${id}** (${desc}) wyjechał na linię **${v.lineName}**`;
+  for (const v of vehicles) {
+    if (!v.vehicleId || !v.lineName) continue;
 
-        // zapis do historii
-        history.unshift({
-          text: msg,
-          time: new Date().toLocaleString("pl-PL")
-        });
-        history = history.slice(0, 50);
+    const id = String(v.vehicleId);
+    current.add(id);
 
-        const ping = PING_ROLE_ID ? `<@&${PING_ROLE_ID}> ` : "";
-        await channel.send(ping + msg);
-      }
+    if (!lastVehicles.has(id)) {
+      const desc = vehicleDescriptions[id] || "Nieznany pojazd";
+      const text = `🚍 **${id}** (${desc}) wyjechał na linię **${v.lineName}**`;
+
+      history.unshift({
+        time: new Date().toLocaleString("pl-PL"),
+        text
+      });
+      history = history.slice(0, 50);
+
+      const channel = await client.channels.fetch(CHANNEL_ID);
+
+      const ping =
+        ALERT_VEHICLES.includes(id) && PING_ROLE_ID
+          ? `<@&${PING_ROLE_ID}> `
+          : "";
+
+      await channel.send(ping + text);
     }
-
-    lastVehicles = current;
-  } catch (err) {
-    console.error("❌ Błąd checkVehicles:", err);
   }
+
+  lastVehicles = current;
 }
 
 // ================= KOMENDY =================
 const commands = [
   new SlashCommandBuilder()
     .setName("pojazdy")
-    .setDescription("Lista aktualnie kursujących pojazdów"),
+    .setDescription("Lista aktualnie jeżdżących pojazdów"),
   new SlashCommandBuilder()
     .setName("historia")
-    .setDescription("Historia ostatnich wyjazdów pojazdów")
+    .setDescription("Historia wyjazdów")
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(TOKEN);
@@ -141,52 +130,41 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
     Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
     { body: commands }
   );
-  console.log("✅ Komendy zarejestrowane");
 })();
 
-// ================= OBSŁUGA KOMEND =================
-client.on("interactionCreate", async interaction => {
-  if (!interaction.isChatInputCommand()) return;
+// ================= INTERACTIONS =================
+client.on("interactionCreate", async i => {
+  if (!i.isChatInputCommand()) return;
 
-  if (interaction.commandName === "pojazdy") {
-    await interaction.deferReply();
-    const vehicles = await fetchVehicles();
+  if (i.commandName === "pojazdy") {
+    const v = await fetchVehicles();
+    if (!v.length) return i.reply("❌ Brak danych z API");
 
-    if (!vehicles.length) {
-      return interaction.editReply("❌ Brak danych z API");
-    }
-
-    const list = vehicles
-      .sort((a, b) => String(a.vehicleId).localeCompare(String(b.vehicleId)))
-      .map(v => {
-        const id = String(v.vehicleId);
-        const desc = vehicleDescriptions[id] || "Nieznany pojazd";
-        return `**${id}** (${desc}) — linia **${v.lineName}**`;
+    const text = v
+      .map(x => {
+        const id = String(x.vehicleId);
+        const d = vehicleDescriptions[id] || "Nieznany pojazd";
+        return `**${id}** (${d}) — linia **${x.lineName}**`;
       })
       .join("\n");
 
-    return interaction.editReply(list);
+    return i.reply(text);
   }
 
-  if (interaction.commandName === "historia") {
-    if (!history.length) {
-      return interaction.reply("📭 Brak zapisanych wyjazdów.");
-    }
+  if (i.commandName === "historia") {
+    if (!history.length) return i.reply("📭 Brak danych");
 
-    const text = history
-      .map(h => `🕒 ${h.time}\n${h.text}`)
-      .join("\n\n");
-
-    return interaction.reply(text);
+    return i.reply(
+      history.map(h => `🕒 ${h.time}\n${h.text}`).join("\n\n")
+    );
   }
 });
 
 // ================= READY =================
 client.once("ready", () => {
-  console.log(`🤖 Bot online: ${client.user.tag}`);
+  console.log(`🤖 Online: ${client.user.tag}`);
   checkVehicles();
   setInterval(checkVehicles, 10 * 60 * 1000);
 });
 
 client.login(TOKEN);
-
