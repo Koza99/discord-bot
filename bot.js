@@ -222,4 +222,6 @@ client.once("ready", () => {
   setInterval(sendVehicleList, 10 * 60 * 1000);
 });
 
-client.login(TOKEN);
+client.login(process.env.DISCORD_TOKEN);
+
+
