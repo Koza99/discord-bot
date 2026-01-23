@@ -1,13 +1,17 @@
-// ================= FETCH (FIX) =================
-const fetch = global.fetch || require("node-fetch");
-
 // ================= KEEP ALIVE (RENDER) =================
 const http = require("http");
 const PORT = process.env.PORT || 10000;
+
 http.createServer((_, res) => {
   res.writeHead(200);
   res.end("OK");
-}).listen(PORT);
+}).listen(PORT, () => {
+  console.log("🌐 HTTP server działa na porcie", PORT);
+});
+
+// ================= FETCH (FIX DLA RENDER / NODE) =================
+const fetch = (...args) =>
+  import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 // ================= DISCORD =================
 const {
@@ -19,10 +23,7 @@ const {
 } = require("discord.js");
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages
-  ]
+  intents: [GatewayIntentBits.Guilds]
 });
 
 // ================= ENV =================
@@ -31,6 +32,8 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 const PING_ROLE_ID = process.env.PING_ROLE_ID;
+
+console.log("LOGIN TOKEN LENGTH:", TOKEN ? TOKEN.length : "BRAK");
 
 // ================= API =================
 const API_URL = "https://rozklady.skarzysko.pl/getRunningVehicles.json";
@@ -50,6 +53,7 @@ const vehicleDescriptions = {
   "442": "MAN NL263",
   "443": "MAN NL263",
   "445": "MAN NL263",
+  "451": "MAN NL263",
   "452": "MAN NL263",
   "453": "MAN NL313",
   "455": "MAN NL313",
@@ -96,7 +100,7 @@ async function fetchVehicles() {
 
     return [];
   } catch (e) {
-    console.error("❌ API error:", e.message);
+    console.error("❌ Błąd API:", e.message);
     return [];
   }
 }
@@ -106,13 +110,16 @@ function sortVehicles(a, b) {
   const A = String(a.vehicleID || a.vehicleId);
   const B = String(b.vehicleID || b.vehicleId);
 
-  const zsA = A.startsWith("ZS");
-  const zsB = B.startsWith("ZS");
+  const isZS_A = A.startsWith("ZS");
+  const isZS_B = B.startsWith("ZS");
 
-  if (zsA && !zsB) return -1;
-  if (!zsA && zsB) return 1;
+  if (isZS_A && !isZS_B) return -1;
+  if (!isZS_A && isZS_B) return 1;
 
-  return parseInt(A.replace(/\D/g, "")) - parseInt(B.replace(/\D/g, ""));
+  const numA = parseInt(A.replace(/\D/g, "")) || 0;
+  const numB = parseInt(B.replace(/\D/g, "")) || 0;
+
+  return numA - numB;
 }
 
 // ================= LISTA CO 10 MIN =================
@@ -136,7 +143,7 @@ async function sendVehicleList() {
   await channel.send(`📋 **Aktualnie jeżdżące pojazdy:**\n${text}`);
 }
 
-// ================= ALERTY =================
+// ================= ALERTY WYJAZDU =================
 async function checkVehicles() {
   const vehicles = await fetchVehicles();
   if (!vehicles.length) return;
@@ -171,25 +178,18 @@ async function checkVehicles() {
 
 // ================= KOMENDY =================
 const commands = [
-  new SlashCommandBuilder().setName("pojazdy").setDescription("Lista jeżdżących pojazdów"),
-  new SlashCommandBuilder().setName("historia").setDescription("Historia alertów")
+  new SlashCommandBuilder()
+    .setName("pojazdy")
+    .setDescription("Lista jeżdżących pojazdów"),
+
+  new SlashCommandBuilder()
+    .setName("historia")
+    .setDescription("Historia alertów")
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(TOKEN);
 
-(async () => {
-  try {
-    await rest.put(
-      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      { body: commands }
-    );
-    console.log("✅ Komendy zarejestrowane");
-  } catch (e) {
-    console.error("❌ Rejestracja komend:", e.message);
-  }
-})();
-
-// ================= INTERAKCJE =================
+// ================= INTERACTIONS =================
 client.on("interactionCreate", async i => {
   if (!i.isChatInputCommand()) return;
 
@@ -220,8 +220,15 @@ client.on("interactionCreate", async i => {
 });
 
 // ================= READY =================
-client.once("ready", () => {
+client.once("ready", async () => {
   console.log(`🤖 Bot online: ${client.user.tag}`);
+
+  await rest.put(
+    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+    { body: commands }
+  );
+
+  console.log("✅ Komendy zarejestrowane");
 
   checkVehicles();
   sendVehicleList();
