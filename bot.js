@@ -1,3 +1,6 @@
+// ================= FETCH (FIX) =================
+const fetch = global.fetch || require("node-fetch");
+
 // ================= KEEP ALIVE (RENDER) =================
 const http = require("http");
 const PORT = process.env.PORT || 10000;
@@ -16,7 +19,10 @@ const {
 } = require("discord.js");
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages
+  ]
 });
 
 // ================= ENV =================
@@ -44,7 +50,6 @@ const vehicleDescriptions = {
   "442": "MAN NL263",
   "443": "MAN NL263",
   "445": "MAN NL263",
-  "451": "MAN NL263",
   "452": "MAN NL263",
   "453": "MAN NL313",
   "455": "MAN NL313",
@@ -80,17 +85,18 @@ const ALERT_VEHICLES = [
 let lastVehicles = new Set();
 let history = [];
 
-// ================= FETCH =================
+// ================= FETCH VEHICLES =================
 async function fetchVehicles() {
   try {
     const res = await fetch(API_URL, { cache: "no-store" });
     const data = await res.json();
 
     if (Array.isArray(data)) return data;
-    if (Array.isArray(data.vehicles)) return data.vehicles;
+    if (Array.isArray(data?.vehicles)) return data.vehicles;
 
     return [];
-  } catch {
+  } catch (e) {
+    console.error("❌ API error:", e.message);
     return [];
   }
 }
@@ -100,16 +106,13 @@ function sortVehicles(a, b) {
   const A = String(a.vehicleID || a.vehicleId);
   const B = String(b.vehicleID || b.vehicleId);
 
-  const isZS_A = A.startsWith("ZS");
-  const isZS_B = B.startsWith("ZS");
+  const zsA = A.startsWith("ZS");
+  const zsB = B.startsWith("ZS");
 
-  if (isZS_A && !isZS_B) return -1;
-  if (!isZS_A && isZS_B) return 1;
+  if (zsA && !zsB) return -1;
+  if (!zsA && zsB) return 1;
 
-  const numA = parseInt(A.replace(/\D/g, ""));
-  const numB = parseInt(B.replace(/\D/g, ""));
-
-  return numA - numB;
+  return parseInt(A.replace(/\D/g, "")) - parseInt(B.replace(/\D/g, ""));
 }
 
 // ================= LISTA CO 10 MIN =================
@@ -133,7 +136,7 @@ async function sendVehicleList() {
   await channel.send(`📋 **Aktualnie jeżdżące pojazdy:**\n${text}`);
 }
 
-// ================= ALERTY WYJAZDU =================
+// ================= ALERTY =================
 async function checkVehicles() {
   const vehicles = await fetchVehicles();
   if (!vehicles.length) return;
@@ -146,7 +149,6 @@ async function checkVehicles() {
 
     current.add(id);
 
-    // 🚨 ALERT TYLKO DLA WYBRANYCH
     if (!ALERT_VEHICLES.includes(id)) continue;
 
     if (!lastVehicles.has(id)) {
@@ -176,12 +178,18 @@ const commands = [
 const rest = new REST({ version: "10" }).setToken(TOKEN);
 
 (async () => {
-  await rest.put(
-    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-    { body: commands }
-  );
+  try {
+    await rest.put(
+      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+      { body: commands }
+    );
+    console.log("✅ Komendy zarejestrowane");
+  } catch (e) {
+    console.error("❌ Rejestracja komend:", e.message);
+  }
 })();
 
+// ================= INTERAKCJE =================
 client.on("interactionCreate", async i => {
   if (!i.isChatInputCommand()) return;
 
@@ -222,6 +230,5 @@ client.once("ready", () => {
   setInterval(sendVehicleList, 10 * 60 * 1000);
 });
 
-client.login(process.env.DISCORD_TOKEN);
-
-
+// ================= LOGIN =================
+client.login(TOKEN);
