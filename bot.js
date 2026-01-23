@@ -1,17 +1,12 @@
 // ================= KEEP ALIVE (RENDER) =================
 const http = require("http");
 const PORT = process.env.PORT || 10000;
-
 http.createServer((_, res) => {
   res.writeHead(200);
   res.end("OK");
 }).listen(PORT, () => {
   console.log("🌐 HTTP server działa na porcie", PORT);
 });
-
-// ================= FETCH (FIX DLA RENDER / NODE) =================
-const fetch = (...args) =>
-  import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 // ================= DISCORD =================
 const {
@@ -22,8 +17,13 @@ const {
   SlashCommandBuilder
 } = require("discord.js");
 
+// 🔴 INTENTY – TO JEST KLUCZOWE
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
 });
 
 // ================= ENV =================
@@ -89,18 +89,18 @@ const ALERT_VEHICLES = [
 let lastVehicles = new Set();
 let history = [];
 
-// ================= FETCH VEHICLES =================
+// ================= FETCH =================
 async function fetchVehicles() {
   try {
     const res = await fetch(API_URL, { cache: "no-store" });
     const data = await res.json();
 
     if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.vehicles)) return data.vehicles;
+    if (Array.isArray(data.vehicles)) return data.vehicles;
 
     return [];
   } catch (e) {
-    console.error("❌ Błąd API:", e.message);
+    console.error("❌ API error:", e);
     return [];
   }
 }
@@ -116,10 +116,7 @@ function sortVehicles(a, b) {
   if (isZS_A && !isZS_B) return -1;
   if (!isZS_A && isZS_B) return 1;
 
-  const numA = parseInt(A.replace(/\D/g, "")) || 0;
-  const numB = parseInt(B.replace(/\D/g, "")) || 0;
-
-  return numA - numB;
+  return parseInt(A.replace(/\D/g, "")) - parseInt(B.replace(/\D/g, ""));
 }
 
 // ================= LISTA CO 10 MIN =================
@@ -127,28 +124,29 @@ async function sendVehicleList() {
   const vehicles = await fetchVehicles();
   if (!vehicles.length) return;
 
+  const channel = await client.channels.fetch(CHANNEL_ID);
+
   const text = vehicles
     .sort(sortVehicles)
     .map(v => {
       const id = String(v.vehicleID || v.vehicleId);
       if (id === "451") return null;
-
       const desc = vehicleDescriptions[id] || "Nieznany pojazd";
       return `**${id}** (${desc}) — linia **${v.lineName}**`;
     })
     .filter(Boolean)
     .join("\n");
 
-  const channel = await client.channels.fetch(CHANNEL_ID);
   await channel.send(`📋 **Aktualnie jeżdżące pojazdy:**\n${text}`);
 }
 
-// ================= ALERTY WYJAZDU =================
+// ================= ALERTY =================
 async function checkVehicles() {
   const vehicles = await fetchVehicles();
   if (!vehicles.length) return;
 
   const current = new Set();
+  const channel = await client.channels.fetch(CHANNEL_ID);
 
   for (const v of vehicles) {
     const id = String(v.vehicleID || v.vehicleId);
@@ -168,7 +166,6 @@ async function checkVehicles() {
       });
       history = history.slice(0, 50);
 
-      const channel = await client.channels.fetch(CHANNEL_ID);
       await channel.send(`<@&${PING_ROLE_ID}> ${text}`);
     }
   }
@@ -178,16 +175,19 @@ async function checkVehicles() {
 
 // ================= KOMENDY =================
 const commands = [
-  new SlashCommandBuilder()
-    .setName("pojazdy")
-    .setDescription("Lista jeżdżących pojazdów"),
-
-  new SlashCommandBuilder()
-    .setName("historia")
-    .setDescription("Historia alertów")
+  new SlashCommandBuilder().setName("pojazdy").setDescription("Lista jeżdżących pojazdów"),
+  new SlashCommandBuilder().setName("historia").setDescription("Historia alertów")
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(TOKEN);
+
+(async () => {
+  await rest.put(
+    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+    { body: commands }
+  );
+  console.log("✅ Komendy zarejestrowane");
+})();
 
 // ================= INTERACTIONS =================
 client.on("interactionCreate", async i => {
@@ -213,22 +213,18 @@ client.on("interactionCreate", async i => {
 
   if (i.commandName === "historia") {
     if (!history.length) return i.reply("📭 Brak historii");
-    return i.reply(
-      history.map(h => `🕒 ${h.time}\n${h.text}`).join("\n\n")
-    );
+    return i.reply(history.map(h => `🕒 ${h.time}\n${h.text}`).join("\n\n"));
   }
 });
 
+// ================= LOGI GATEWAY =================
+client.on("error", console.error);
+client.on("shardError", console.error);
+client.on("disconnect", () => console.log("❌ Discord disconnect"));
+
 // ================= READY =================
-client.once("ready", async () => {
+client.once("ready", () => {
   console.log(`🤖 Bot online: ${client.user.tag}`);
-
-  await rest.put(
-    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-    { body: commands }
-  );
-
-  console.log("✅ Komendy zarejestrowane");
 
   checkVehicles();
   sendVehicleList();
@@ -238,4 +234,11 @@ client.once("ready", async () => {
 });
 
 // ================= LOGIN =================
-client.login(TOKEN);
+(async () => {
+  try {
+    console.log("⏳ Próba logowania do Discorda...");
+    await client.login(TOKEN);
+  } catch (e) {
+    console.error("❌ LOGIN FAILED:", e);
+  }
+})();
