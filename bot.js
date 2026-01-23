@@ -1,3 +1,5 @@
+require("dns").setDefaultResultOrder("ipv4first");
+
 // ================= KEEP ALIVE (RENDER) =================
 const http = require("http");
 const PORT = process.env.PORT || 10000;
@@ -17,13 +19,8 @@ const {
   SlashCommandBuilder
 } = require("discord.js");
 
-// 🔴 INTENTY – TO JEST KLUCZOWE
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-  ]
+  intents: [GatewayIntentBits.Guilds]
 });
 
 // ================= ENV =================
@@ -33,7 +30,7 @@ const GUILD_ID = process.env.GUILD_ID;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 const PING_ROLE_ID = process.env.PING_ROLE_ID;
 
-console.log("LOGIN TOKEN LENGTH:", TOKEN ? TOKEN.length : "BRAK");
+console.log("LOGIN TOKEN LENGTH:", TOKEN?.length);
 
 // ================= API =================
 const API_URL = "https://rozklady.skarzysko.pl/getRunningVehicles.json";
@@ -94,10 +91,8 @@ async function fetchVehicles() {
   try {
     const res = await fetch(API_URL, { cache: "no-store" });
     const data = await res.json();
-
     if (Array.isArray(data)) return data;
-    if (Array.isArray(data.vehicles)) return data.vehicles;
-
+    if (Array.isArray(data?.vehicles)) return data.vehicles;
     return [];
   } catch (e) {
     console.error("❌ API error:", e);
@@ -124,8 +119,6 @@ async function sendVehicleList() {
   const vehicles = await fetchVehicles();
   if (!vehicles.length) return;
 
-  const channel = await client.channels.fetch(CHANNEL_ID);
-
   const text = vehicles
     .sort(sortVehicles)
     .map(v => {
@@ -137,6 +130,7 @@ async function sendVehicleList() {
     .filter(Boolean)
     .join("\n");
 
+  const channel = await client.channels.fetch(CHANNEL_ID);
   await channel.send(`📋 **Aktualnie jeżdżące pojazdy:**\n${text}`);
 }
 
@@ -146,28 +140,23 @@ async function checkVehicles() {
   if (!vehicles.length) return;
 
   const current = new Set();
-  const channel = await client.channels.fetch(CHANNEL_ID);
 
   for (const v of vehicles) {
     const id = String(v.vehicleID || v.vehicleId);
     if (!id || id === "451") continue;
-
     current.add(id);
 
     if (!ALERT_VEHICLES.includes(id)) continue;
+    if (lastVehicles.has(id)) continue;
 
-    if (!lastVehicles.has(id)) {
-      const desc = vehicleDescriptions[id] || "Nieznany pojazd";
-      const text = `🚍 **${id}** (${desc}) wyjechał na linię **${v.lineName}**`;
+    const desc = vehicleDescriptions[id] || "Nieznany pojazd";
+    const text = `🚍 **${id}** (${desc}) wyjechał na linię **${v.lineName}**`;
 
-      history.unshift({
-        time: new Date().toLocaleString("pl-PL"),
-        text
-      });
-      history = history.slice(0, 50);
+    history.unshift({ time: new Date().toLocaleString("pl-PL"), text });
+    history = history.slice(0, 50);
 
-      await channel.send(`<@&${PING_ROLE_ID}> ${text}`);
-    }
+    const channel = await client.channels.fetch(CHANNEL_ID);
+    await channel.send(`<@&${PING_ROLE_ID}> ${text}`);
   }
 
   lastVehicles = current;
@@ -217,28 +206,17 @@ client.on("interactionCreate", async i => {
   }
 });
 
-// ================= LOGI GATEWAY =================
-client.on("error", console.error);
-client.on("shardError", console.error);
-client.on("disconnect", () => console.log("❌ Discord disconnect"));
-
 // ================= READY =================
 client.once("ready", () => {
   console.log(`🤖 Bot online: ${client.user.tag}`);
-
   checkVehicles();
   sendVehicleList();
-
   setInterval(checkVehicles, 60 * 1000);
   setInterval(sendVehicleList, 10 * 60 * 1000);
 });
 
 // ================= LOGIN =================
-(async () => {
-  try {
-    console.log("⏳ Próba logowania do Discorda...");
-    await client.login(TOKEN);
-  } catch (e) {
-    console.error("❌ LOGIN FAILED:", e);
-  }
-})();
+console.log("⏳ Próba logowania do Discorda...");
+client.login(TOKEN)
+  .then(() => console.log("✅ Zalogowano do Discord API"))
+  .catch(err => console.error("❌ Login error:", err));
